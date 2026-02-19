@@ -6,9 +6,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const mongoose = require("mongoose");
+const { getNextSequence } = require("./Counter");
 
 const notificationSchema = new mongoose.Schema(
   {
+    notificationId: {
+      type: Number,
+      unique: true, // No two notifications share the same notificationId
+      immutable: true, // Once assigned, cannot be changed
+    },
     message: {
       type: String,
       required: true,
@@ -44,6 +50,13 @@ const notificationSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// ── Pre-save Hook: Auto-increment notificationId ─────────────────────────────
+notificationSchema.pre("save", async function () {
+  if (this.isNew) {
+    this.notificationId = await getNextSequence("notificationId"); // → 1, 2, 3 ...
+  }
+});
 
 // Index for fast lookup of unread notifications per user
 notificationSchema.index({ recipient: 1, isRead: 1 });

@@ -9,9 +9,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const mongoose = require("mongoose");
+const { getNextSequence } = require("./Counter");
 
 const taskSchema = new mongoose.Schema(
   {
+    taskId: {
+      type: Number,
+      unique: true, // No two tasks share the same taskId
+      immutable: true, // Once assigned, cannot be changed
+    },
     title: {
       type: String,
       required: [true, "Task title is required"],
@@ -71,6 +77,13 @@ const taskSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// ── Pre-save Hook: Auto-increment taskId ─────────────────────────────────────
+taskSchema.pre("save", async function () {
+  if (this.isNew) {
+    this.taskId = await getNextSequence("taskId"); // → 1, 2, 3 ...
+  }
+});
 
 // ── Index ─────────────────────────────────────────────────────────────────────
 // Indexes speed up queries. We often query tasks by project and status,

@@ -8,9 +8,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const mongoose = require("mongoose");
+const { getNextSequence } = require("./Counter");
 
 const commentSchema = new mongoose.Schema(
   {
+    commentId: {
+      type: Number,
+      unique: true, // No two comments share the same commentId
+      immutable: true, // Once assigned, cannot be changed
+    },
     content: {
       type: String,
       required: [true, "Comment content is required"],
@@ -34,5 +40,12 @@ const commentSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// ── Pre-save Hook: Auto-increment commentId ───────────────────────────────────
+commentSchema.pre("save", async function () {
+  if (this.isNew) {
+    this.commentId = await getNextSequence("commentId"); // → 1, 2, 3 ...
+  }
+});
 
 module.exports = mongoose.model("Comment", commentSchema);

@@ -8,9 +8,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const mongoose = require("mongoose");
+const { getNextSequence } = require("./Counter");
 
 const projectSchema = new mongoose.Schema(
   {
+    projectId: {
+      type: Number,
+      unique: true, // No two projects share the same projectId
+      immutable: true, // Once assigned, cannot be changed
+    },
     title: {
       type: String,
       required: [true, "Project title is required"],
@@ -65,6 +71,13 @@ const projectSchema = new mongoose.Schema(
 // Here we compute memberCount from the members array length
 projectSchema.virtual("memberCount").get(function () {
   return this.members.length;
+});
+
+// ── Pre-save Hook: Auto-increment projectId ───────────────────────────────────
+projectSchema.pre("save", async function () {
+  if (this.isNew) {
+    this.projectId = await getNextSequence("projectId"); // → 1, 2, 3 ...
+  }
 });
 
 module.exports = mongoose.model("Project", projectSchema);

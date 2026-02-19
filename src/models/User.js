@@ -8,9 +8,15 @@
 
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const { getNextSequence } = require("./Counter");
 
 const userSchema = new mongoose.Schema(
   {
+    userId: {
+      type: Number,
+      unique: true, // Guarantees no two users share the same userId
+      immutable: true, // Once set, it can never be changed (like a real ID)
+    },
     name: {
       type: String,
       required: [true, "Name is required"], // Custom error message
@@ -51,18 +57,28 @@ const userSchema = new mongoose.Schema(
   },
 );
 
-// ── Pre-save Hook ─────────────────────────────────────────────────────────────
+// ── Pre-save Hook: Auto-increment userId ──────────────────────────────────────
+// this.isNew = true only on first save (User.create / new User().save)
+// We fetch the next sequence from the Counter collection and assign it.
+// This is atomic — even if 100 users register at the same time, each gets
+// a unique number (MongoDB's findOneAndUpdate + $inc guarantees this).
+userSchema.pre("save", async function () {
+  if (this.isNew) {
+    this.userId = await getNextSequence("userId"); // → 1, 2, 3, 4 ...
+  }
+});
+
+// ── Pre-save Hook: Password Hashing ───────────────────────────────────────────
 // This runs BEFORE every .save() call
 // We hash the password here so we never store plain text passwords
 // isModified('password') = only re-hash if password actually changed
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) return;
 
   // bcrypt.genSalt(10) creates a "salt" — random data added to password before hashing
   // 10 = cost factor (higher = more secure but slower)
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
-  next();
 });
 
 // ── Instance Method ───────────────────────────────────────────────────────────
