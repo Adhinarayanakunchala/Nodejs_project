@@ -12,9 +12,17 @@ const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const path = require("path");
+const fs = require("fs");
+const yaml = require("js-yaml");
+const swaggerUi = require("swagger-ui-express");
 
 const logger = require("./utils/logger");
 const { globalLimiter } = require("./middleware/rateLimiter");
+
+// Load Swagger YAML spec
+const swaggerDocument = yaml.load(
+  fs.readFileSync(path.join(__dirname, "../docs/swagger.yaml"), "utf8"),
+);
 
 const app = express();
 
@@ -47,6 +55,19 @@ app.use(express.urlencoded({ extended: true }));
 // Serve uploaded files publicly at /uploads/filename
 // e.g., http://localhost:5000/uploads/myfile.pdf
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
+// ── Swagger UI ────────────────────────────────────────────────────────────────
+// Interactive API docs available at: http://localhost:5000/api-docs
+// Swagger UI is served BEFORE routes so it's always accessible
+app.use(
+  "/api-docs",
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerDocument, {
+    customSiteTitle: "Work Management API Docs",
+    customCss: ".swagger-ui .topbar { background-color: #1a1a2e; }",
+    swaggerOptions: { persistAuthorization: true },
+  }),
+);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 // Each module has its own router — we mount them here with a base path
