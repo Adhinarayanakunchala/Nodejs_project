@@ -1,0 +1,952 @@
+openapi: 3.0.3
+info:
+  title: Work Management API
+  description: |
+    REST API for the Work Management System.
+    Built with Node.js, Express, MongoDB, and Socket.IO.
+
+    ## Authentication
+    All protected routes require a **Bearer JWT token** in the `Authorization` header.
+    Obtain a token via `POST /api/auth/login`.
+
+    ## Rate Limiting
+    - **Global**: 100 requests / 15 minutes per IP
+    - **Auth routes** (`/login`, `/register`): 10 requests / 15 minutes per IP
+
+    ## Real-Time (Socket.IO)
+    Connect to `ws://localhost:5000` with `{ auth: { token: "Bearer <jwt>" } }`.
+    See Socket Events section in the README.
+  version: 1.0.0
+  contact:
+    name: Work Management API Support
+
+servers:
+  - url: http://localhost:5000/api
+    description: Local development server
+
+tags:
+  - name: Auth
+    description: Authentication and user session
+  - name: Users
+    description: User management (admin operations)
+  - name: Projects
+    description: Project CRUD and membership
+  - name: Tasks
+    description: Task management, assignment, and file uploads
+  - name: Comments
+    description: Comments on tasks
+  - name: Dashboard
+    description: Stats and notifications
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: Descriptive error message
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 50
+        page:
+          type: integer
+          example: 1
+        pages:
+          type: integer
+          example: 5
+
+    User:
+      type: object
+      properties:
+        _id:
+          type: string
+          example: "65abc123def456"
+        name:
+          type: string
+          example: Alice Smith
+        email:
+          type: string
+          format: email
+          example: alice@example.com
+        role:
+          type: string
+          enum: [admin, manager, employee]
+          example: employee
+        avatar:
+          type: string
+          nullable: true
+          example: null
+        isActive:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Project:
+      type: object
+      properties:
+        _id:
+          type: string
+        title:
+          type: string
+          example: Website Redesign
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, completed, on-hold]
+        priority:
+          type: string
+          enum: [low, medium, high]
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        createdBy:
+          $ref: "#/components/schemas/User"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/User"
+        createdAt:
+          type: string
+          format: date-time
+
+    Task:
+      type: object
+      properties:
+        _id:
+          type: string
+        title:
+          type: string
+          example: Design homepage
+        description:
+          type: string
+        status:
+          type: string
+          enum: [todo, in-progress, review, done]
+          default: todo
+        priority:
+          type: string
+          enum: [low, medium, high, urgent]
+          default: medium
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+        project:
+          $ref: "#/components/schemas/Project"
+        assignedTo:
+          $ref: "#/components/schemas/User"
+          nullable: true
+        createdBy:
+          $ref: "#/components/schemas/User"
+        attachments:
+          type: array
+          items:
+            type: object
+            properties:
+              filename:
+                type: string
+              originalName:
+                type: string
+              mimetype:
+                type: string
+              size:
+                type: integer
+              uploadedAt:
+                type: string
+                format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    Comment:
+      type: object
+      properties:
+        _id:
+          type: string
+        content:
+          type: string
+          example: Looks good, moving to review!
+        task:
+          type: string
+        author:
+          $ref: "#/components/schemas/User"
+        createdAt:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        _id:
+          type: string
+        message:
+          type: string
+          example: You have been assigned to task "Design homepage"
+        type:
+          type: string
+          enum: [task_assigned, task_updated]
+        isRead:
+          type: boolean
+          default: false
+        relatedTask:
+          type: string
+        relatedProject:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        user:
+          $ref: "#/components/schemas/User"
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ─── AUTH ────────────────────────────────────────────────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  example: Alice Smith
+                email:
+                  type: string
+                  format: email
+                  example: alice@example.com
+                password:
+                  type: string
+                  minLength: 6
+                  example: secret123
+                role:
+                  type: string
+                  enum: [admin, manager, employee]
+                  default: employee
+      responses:
+        "201":
+          description: Registered successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many attempts (rate limit)
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login user and receive JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: alice@example.com
+                password:
+                  type: string
+                  example: secret123
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+        "429":
+          description: Too many login attempts
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current logged-in user profile
+      responses:
+        "200":
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  # ─── USERS ───────────────────────────────────────────────────────────────────
+  /users:
+    get:
+      tags: [Users]
+      summary: Get all users (Admin only)
+      parameters:
+        - in: query
+          name: role
+          schema:
+            type: string
+            enum: [admin, manager, employee]
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: List of users with pagination
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      users:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/User"
+                      pagination:
+                        $ref: "#/components/schemas/Pagination"
+        "403":
+          description: Forbidden (admin only)
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get user by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User object
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SuccessResponse"
+                  - type: object
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+        "404":
+          description: User not found
+
+    put:
+      tags: [Users]
+      summary: Update user profile
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                avatar:
+                  type: string
+                isActive:
+                  type: boolean
+      responses:
+        "200":
+          description: Updated user
+
+    delete:
+      tags: [Users]
+      summary: Delete user (Admin only)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User deleted
+        "403":
+          description: Forbidden
+
+  # ─── PROJECTS ─────────────────────────────────────────────────────────────────
+  /projects:
+    get:
+      tags: [Projects]
+      summary: Get all projects (role-filtered)
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [active, completed, on-hold]
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Paginated list of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      projects:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Project"
+                      pagination:
+                        $ref: "#/components/schemas/Pagination"
+
+    post:
+      tags: [Projects]
+      summary: Create a new project (Admin/Manager)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  example: Website Redesign
+                description:
+                  type: string
+                status:
+                  type: string
+                  enum: [active, completed, on-hold]
+                  default: active
+                priority:
+                  type: string
+                  enum: [low, medium, high]
+                  default: medium
+                deadline:
+                  type: string
+                  format: date
+                  example: "2026-03-01"
+      responses:
+        "201":
+          description: Project created
+        "403":
+          description: Forbidden (admin/manager only)
+
+  /projects/{id}:
+    get:
+      tags: [Projects]
+      summary: Get project by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Project detail
+
+    put:
+      tags: [Projects]
+      summary: Update project (Admin/Manager)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                status:
+                  type: string
+                  enum: [active, completed, on-hold]
+                priority:
+                  type: string
+                  enum: [low, medium, high]
+                deadline:
+                  type: string
+                  format: date
+      responses:
+        "200":
+          description: Updated project
+
+  /projects/{id}/members:
+    post:
+      tags: [Projects]
+      summary: Add member to project (Admin/Manager)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+                  example: "65abc123def456"
+      responses:
+        "200":
+          description: Member added
+
+    delete:
+      tags: [Projects]
+      summary: Remove member from project (Admin/Manager)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+      responses:
+        "200":
+          description: Member removed
+
+  # ─── TASKS ────────────────────────────────────────────────────────────────────
+  /tasks:
+    get:
+      tags: [Tasks]
+      summary: Get tasks (role-filtered)
+      description: Employees only see their assigned tasks. Admins/Managers see all.
+      parameters:
+        - in: query
+          name: project
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [todo, in-progress, review, done]
+        - in: query
+          name: priority
+          schema:
+            type: string
+            enum: [low, medium, high, urgent]
+        - in: query
+          name: assignedTo
+          schema:
+            type: string
+          description: Admin/Manager only
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Paginated task list
+
+    post:
+      tags: [Tasks]
+      summary: Create a task (Admin/Manager)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, project]
+              properties:
+                title:
+                  type: string
+                  example: Design homepage
+                description:
+                  type: string
+                project:
+                  type: string
+                  example: "PROJECT_ID"
+                assignedTo:
+                  type: string
+                  nullable: true
+                priority:
+                  type: string
+                  enum: [low, medium, high, urgent]
+                  default: medium
+                dueDate:
+                  type: string
+                  format: date
+                  nullable: true
+                status:
+                  type: string
+                  enum: [todo, in-progress, review, done]
+                  default: todo
+      responses:
+        "201":
+          description: Task created
+
+  /tasks/{id}:
+    get:
+      tags: [Tasks]
+      summary: Get task by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Task detail
+
+    put:
+      tags: [Tasks]
+      summary: Update task (Admin/Manager)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                  enum: [low, medium, high, urgent]
+                dueDate:
+                  type: string
+                  format: date
+      responses:
+        "200":
+          description: Updated task
+
+  /tasks/{id}/status:
+    patch:
+      tags: [Tasks]
+      summary: Update task status (all roles)
+      description: ⚡ Triggers real-time `task:updated` Socket.IO event to all project room members.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [todo, in-progress, review, done]
+      responses:
+        "200":
+          description: Status updated — real-time event emitted
+
+  /tasks/{id}/assign:
+    post:
+      tags: [Tasks]
+      summary: Assign task to user (Admin/Manager)
+      description: ⚡ Triggers real-time `notification:new` Socket.IO event to the assigned user.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId:
+                  type: string
+                  example: "USER_ID"
+      responses:
+        "200":
+          description: Task assigned — notification emitted
+
+  /tasks/{id}/attachments:
+    post:
+      tags: [Tasks]
+      summary: Upload file attachment to task
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: "Max 5MB. Allowed: jpeg, jpg, png, gif, pdf, doc, docx, txt"
+      responses:
+        "200":
+          description: File uploaded, task updated with attachment
+
+  # ─── COMMENTS ─────────────────────────────────────────────────────────────────
+  /comments/task/{taskId}:
+    get:
+      tags: [Comments]
+      summary: Get all comments for a task
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of comments
+
+    post:
+      tags: [Comments]
+      summary: Add comment to a task
+      parameters:
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  example: "This task needs more clarity on design specs."
+      responses:
+        "201":
+          description: Comment added
+
+  /comments/{id}:
+    delete:
+      tags: [Comments]
+      summary: Delete comment (own or admin)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Comment deleted
+        "403":
+          description: Not authorized to delete this comment
+
+  # ─── DASHBOARD ────────────────────────────────────────────────────────────────
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Get dashboard statistics (role-aware)
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      stats:
+                        type: object
+                        properties:
+                          totalProjects:
+                            type: integer
+                          totalTasks:
+                            type: integer
+                          totalUsers:
+                            type: integer
+                            nullable: true
+                            description: Only present for admin role
+                          unreadNotifications:
+                            type: integer
+                      tasksByStatus:
+                        type: object
+                        properties:
+                          todo:
+                            type: integer
+                          in-progress:
+                            type: integer
+                          review:
+                            type: integer
+                          done:
+                            type: integer
+                      recentTasks:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Task"
+
+  /dashboard/notifications:
+    get:
+      tags: [Dashboard]
+      summary: Get user notifications (last 20)
+      responses:
+        "200":
+          description: Notification list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+
+  /dashboard/notifications/{id}/read:
+    patch:
+      tags: [Dashboard]
+      summary: Mark notification as read
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notification marked as read
